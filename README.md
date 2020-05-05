@@ -12,6 +12,8 @@ The task is to generate multi-sentence/long detailed answers to questions that r
 More details on these improvements are present in the [report](). We have adapted the 
 [fairseq](https://github.com/pytorch/fairseq) codebase for our project. The dataset creation and preprocessing steps are shown [here](https://github.com/facebookresearch/ELI5). 
 
+Model checkpoints can be found [here](https://drive.google.com/open?id=1McL2deynWpPmFpdcy9MfZbjrRRgkzOqn).
+
 
 
 
