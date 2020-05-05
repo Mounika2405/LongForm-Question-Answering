@@ -690,7 +690,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             self.layernorm_embedding = None
 
         ### Pointer Generator Networks related code:
-        self.ptr_predictor = nn.Sequential(Linear(512 * 3, 1, bias=False), nn.Sigmoid()) # hard-coded for now!!!
+        # self.ptr_predictor = nn.Sequential(Linear(512 * 3, 1, bias=False), nn.Sigmoid()) # hard-coded for now!!!
       
 
     def build_decoder_layer(self, args, no_encoder_attn=False):
@@ -739,88 +739,111 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             Will pass last layer's attention scores and last layer of encoder's states
         '''
         # task_mask = torch.zeros_like(src_tokens[:, 0]).bool()
+
+        task_mask = (src_tokens[:, 0] == 947).to(src_tokens).bool()
+        # print(task_mask)
+        # if task_mask.any(): print(src_tokens[task_mask], src_tokens.size(1))
+        # input()
+        # return x, extra
+        # exit(0)
+
         # for tid in [944, 945, 946, 947]:
         #     task_mask += (src_tokens[:, 0] == tid)
-        task_mask = (src_tokens[:, 0] == 947).to(src_tokens).bool()
-        # print(src_tokens.size(0))
-        # print(encoder_out.encoder_out.size(1))
+        
         # print(task_mask)
         # print(src_tokens)
         # input()
 
-        # return utils.log_softmax(x, dim=-1, onnx_trace=self.onnx_trace), extra
-        task_results = torch.zeros_like(x).float()
-
-        if (~task_mask).any():
-            task_results[~task_mask] = utils.log_softmax(x[~task_mask], dim=-1, onnx_trace=self.onnx_trace)
         if task_mask.any():
-            task_results[task_mask] = self._calc_final_dist(encoder_out.encoder_out[:, task_mask], src_tokens[task_mask],
-                                extra['before_dec'][task_mask], extra['before_dec'][task_mask], x[task_mask], 
-                                extra['attn'][-1][task_mask])
+            extra['div_loss'] = self._calc_diversity_loss(extra['attn'], task_mask)
+        else:
+            extra['div_loss'] = 0.
 
-        return task_results, extra
+        return utils.log_softmax(x, dim=-1, onnx_trace=self.onnx_trace), extra
+        # task_results = torch.zeros_like(x).float()
 
-    def _calc_final_dist(self, encoder_out, src_tokens, before_dec, dec, vocab_dists, attn_dists):
-        '''
-            encoder_out             : [T_source, B, encoder_dim]
-            src_tokens              : [B, T_source]
-            before_dec              : [B, T_target, decoder_dim]
-            dec                     : [B, T_target, decoder_dim]
-            vocab_dists             : [B, T_target, V_target]
-            attn_dists              : [B, T_target, T_source]
+        # if (~task_mask).any():
+        #     task_results[~task_mask] = utils.log_softmax(x[~task_mask], dim=-1, onnx_trace=self.onnx_trace)
+        #     extra['div_loss'] = 0.
+        # if task_mask.any():
+        #     task_results[task_mask] = self._calc_final_dist(encoder_out.encoder_states[-1][:, task_mask], src_tokens[task_mask],
+        #                         extra['before_dec'][task_mask], extra['before_dec'][task_mask], x[task_mask], 
+        #                         extra['attn'][-1][task_mask])
+        #     extra['div_loss'] = self._calc_diversity_loss(extra['attn'], task_mask)
+
+        # return task_results, extra
+
+    # def _calc_final_dist(self, encoder_out, src_tokens, before_dec, dec, vocab_dists, attn_dists):
+    #     '''
+    #         encoder_out             : [T_source, B, encoder_dim]
+    #         src_tokens              : [B, T_source]
+    #         before_dec              : [B, T_target, decoder_dim]
+    #         dec                     : [B, T_target, decoder_dim]
+    #         vocab_dists             : [B, T_target, V_target]
+    #         attn_dists              : [B, T_target, T_source]
             
-            Will compute:
+    #         Will compute:
 
-                context_vector      : [B, T_target, encoder_dim]
-                gens                : [B, T_target, 1]
-        '''
+    #             context_vector      : [B, T_target, encoder_dim]
+    #             gens                : [B, T_target, 1]
+    #     '''
         
-        # print('encoder_out', encoder_out.size())
-        # print('before_dec', before_dec.size())
-        # print('dec', dec.size())
-        # print('vocab_dists', vocab_dists.size())
-        # print(torch.sum(attn_dists, dim=-1, keepdim=False))
-        # input()
-        # encoder_out = encoder_out.float()
-        # src_tokens = src_tokens.float()
-        # before_dec = before_dec.float()
-        # dec = dec.float()
-        # vocab_dists = vocab_dists.float()
-        # attn_dists = attn_dists.float()
+    #     # print('encoder_out', encoder_out.size())
+    #     # print('before_dec', before_dec.size())
+    #     # print('dec', dec.size())
+    #     # print('vocab_dists', vocab_dists.size())
+    #     # print(torch.sum(attn_dists, dim=-1, keepdim=False))
+    #     # input()
+    #     # encoder_out = encoder_out.float()
+    #     # src_tokens = src_tokens.float()
+    #     # before_dec = before_dec.float()
+    #     # dec = dec.float()
+    #     # vocab_dists = vocab_dists.float()
+    #     # attn_dists = attn_dists.float()
 
-        # Get context vector for each decoder time-step: weighted sum of encoder states at that time-step
-        encoder_out = encoder_out.transpose(1, 0) # [B, T_source, encoder_dim]
-        context_vector = torch.bmm(attn_dists, encoder_out) # [B, T_target, encoder_dim]
+    #     # Get context vector for each decoder time-step: weighted sum of encoder states at that time-step
+    #     encoder_out = encoder_out.transpose(1, 0) # [B, T_source, encoder_dim]
+    #     context_vector = torch.bmm(attn_dists, encoder_out) # [B, T_target, encoder_dim]
 
-        # get probability of pointing
-        prob_gen = self.ptr_predictor(torch.cat([context_vector, before_dec, dec], dim=-1)) # [B, T_target, 1]
-        # print(prob_gen)
-        # input()
+    #     # get probability of pointing
+    #     prob_gen = self.ptr_predictor(torch.cat([context_vector, before_dec, dec], dim=-1)) # [B, T_target, 1]
+    #     # print(prob_gen)
+    #     # input()
 
-        # get probability of generating
-        prob_ptr = 1 - prob_gen
-        # print(attn_dists)
-        # input()
-        # indices = src_tokens.unsqueeze(1).expand_as(attn_dists)
-        # print(utils.log_softmax(vocab_dists, dim=-1, onnx_trace=self.onnx_trace).half()[0, 2, indices[0][2]])
-        # input()
+    #     # get probability of generating
+    #     prob_ptr = 1 - prob_gen
+    #     # print(attn_dists)
+    #     # input()
+    #     # indices = src_tokens.unsqueeze(1).expand_as(attn_dists)
+    #     # print(utils.log_softmax(vocab_dists, dim=-1, onnx_trace=self.onnx_trace).half()[0, 2, indices[0][2]])
+    #     # input()
 
-        vocab_dists = utils.softmax(vocab_dists, dim=-1, onnx_trace=self.onnx_trace)
-        output = prob_gen * vocab_dists # [B, T_target, V_target]
+    #     vocab_dists = utils.softmax(vocab_dists, dim=-1, onnx_trace=self.onnx_trace)
+    #     output = prob_gen * vocab_dists # [B, T_target, V_target]
 
-        ptr_output = prob_ptr * attn_dists # [B, T_target, T_source]
+    #     ptr_output = prob_ptr * attn_dists # [B, T_target, T_source]
 
-        indices = src_tokens.unsqueeze(1).expand_as(ptr_output) # [B, T_target, T_source]
-        # print(output[0, 2, indices[0][2]])
-        # input()
-        output.scatter_add_(dim=2, index=indices, src=ptr_output)
-        # print(output[0, 2, indices[0][2]])
-        # print(vocab_dists[0, 2, indices[0][2]])
-        # input()
-        output = torch.log(output + 1e-31)#.float()
-        # print(output[0, 2, indices[0][2]])
-        # input()
-        return output
+    #     indices = src_tokens.unsqueeze(1).expand_as(ptr_output) # [B, T_target, T_source]
+    #     # print(output[0, 2, indices[0][2]])
+    #     # input()
+    #     output.scatter_add_(dim=2, index=indices, src=ptr_output)
+    #     # print(output[0, 2, indices[0][2]])
+    #     # print(vocab_dists[0, 2, indices[0][2]])
+    #     # input()
+    #     output = torch.log(output + 1e-31)#.float()
+    #     # print(output[0, 2, indices[0][2]])
+    #     # input()
+    #     return output
+
+    def _calc_diversity_loss(self, attns, task_mask):
+        div_loss = 0.
+        for A in attns:
+            A = A[task_mask]
+            AAt = torch.bmm(A, A.transpose(1, 2))
+            I = torch.eye(AAt.size(1)).unsqueeze(0).to(AAt)
+            div_loss += (torch.norm(AAt - I) / AAt.size(1))
+
+        return div_loss
 
     def extract_features(
         self,
@@ -891,7 +914,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             self_attn_padding_mask = prev_output_tokens.eq(self.padding_idx)
 
         # decoder layers
-        attn: Optional[Tensor] = None
+        attns = []
         inner_states: List[Optional[Tensor]] = [x]
         for idx, layer in enumerate(self.layers):
             encoder_state: Optional[Tensor] = None
@@ -924,15 +947,18 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                     need_head_weights=True, #bool((idx == alignment_layer)),
                 )
                 inner_states.append(x)
-                if layer_attn is not None and idx == alignment_layer:
+                # if layer_attn is not None and idx == alignment_layer:
+                if layer_attn is not None:
                     attn = layer_attn.float().to(x)
 
-        if attn is not None:
-            if alignment_heads is not None:
-                attn = attn[:alignment_heads]
+                if attn is not None:
+                    if alignment_heads is not None:
+                        attn = attn[:alignment_heads]
 
-            # average probabilities over heads
-            attn = attn.mean(dim=0)
+                    # average probabilities over heads
+                    attn = attn.mean(dim=0)
+
+                    attns.append(attn)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -944,7 +970,7 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         if self.project_out_dim is not None:
             x = self.project_out_dim(x)
 
-        return x, {"attn": [attn], "inner_states": inner_states, 'before_dec' : before_dec, 'dec': dec}
+        return x, {"attn": attns, "inner_states": inner_states, 'before_dec' : before_dec, 'dec': dec}
 
     def output_layer(self, features):
         """Project features to the vocabulary size."""
@@ -1142,6 +1168,6 @@ def transformer_wmt_en_de_big_align(args):
     args.alignment_layer = getattr(args, "alignment_layer", 4)
     transformer_wmt_en_de_big(args)
 
-@register_model_architecture("transformer", "transformer_pointer")
-def transformer_pointer(args):
+@register_model_architecture("transformer", "transformer_cover")
+def transformer_cover(args):
     base_architecture(args)
